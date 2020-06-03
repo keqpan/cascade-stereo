@@ -68,7 +68,7 @@ class DepthNet(nn.Module):
 
 class CascadeMVSNet(nn.Module):
     def __init__(self, refine=False, ndepths=[48, 32, 8], depth_interals_ratio=[4, 2, 1], share_cr=False,
-                 grad_method="detach", arch_mode="fpn", cr_base_chs=[8, 8, 8]):
+                 grad_method="detach", arch_mode="fpn", cr_base_chs=[8, 8, 8], use_lq_depth=False):
         super(CascadeMVSNet, self).__init__()
         self.refine = refine
         self.share_cr = share_cr
@@ -104,9 +104,10 @@ class CascadeMVSNet(nn.Module):
                                                       for i in range(self.num_stage)])
         if self.refine:
             self.refine_network = RefineNet()
+        self.use_lq_depth = use_lq_depth
         self.DepthNet = DepthNet()
 
-    def forward(self, imgs, proj_matrices, depth_values):
+    def forward(self, imgs, proj_matrices, depth_values, **kwargs):
         depth_min = float(depth_values[0, 0].cpu().numpy())
         depth_max = float(depth_values[0, -1].cpu().numpy())
         depth_interval = (depth_max - depth_min) / depth_values.size(1)
@@ -119,6 +120,12 @@ class CascadeMVSNet(nn.Module):
 
         outputs = {}
         depth, cur_depth = None, None
+                
+        if self.use_lq_depth:
+            lq_depth = kwargs["lq_depth"]
+            depth = lq_depth["stage1"]
+            cur_depth = lq_depth["stage1"]
+            
         for stage_idx in range(self.num_stage):
             # print("*********************stage{}*********************".format(stage_idx + 1))
             #stage feature, proj_mats, scales

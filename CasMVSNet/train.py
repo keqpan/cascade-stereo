@@ -58,6 +58,8 @@ parser.add_argument('--opt-level', type=str, default="O0")
 parser.add_argument('--keep-batchnorm-fp32', type=str, default=None)
 parser.add_argument('--loss-scale', type=str, default=None)
 
+parser.add_argument('--use_lq_depth', action='store_true', default=False)
+
 
 num_gpus = int(os.environ["WORLD_SIZE"]) if "WORLD_SIZE" in os.environ else 1
 is_distributed = num_gpus > 1
@@ -156,8 +158,12 @@ def train_sample(model, model_loss, optimizer, sample, args):
     num_stage = len([int(nd) for nd in args.ndepths.split(",") if nd])
     depth_gt = depth_gt_ms["stage{}".format(num_stage)]
     mask = mask_ms["stage{}".format(num_stage)]
-
-    outputs = model(sample_cuda["imgs"], sample_cuda["proj_matrices"], sample_cuda["depth_values"])
+    
+    if args.use_lq_depth:
+        depth_lq_ms = sample_cuda["lq_depth"]
+        outputs = model(sample_cuda["imgs"], sample_cuda["proj_matrices"], sample_cuda["depth_values"], lq_depth=depth_lq_ms)
+    else:
+        outputs = model(sample_cuda["imgs"], sample_cuda["proj_matrices"], sample_cuda["depth_values"])
     depth_est = outputs["depth"]
 
     loss, depth_loss = model_loss(outputs, depth_gt_ms, mask_ms, dlossw=[float(e) for e in args.dlossw.split(",") if e])
@@ -206,8 +212,12 @@ def test_sample_depth(model, model_loss, sample, args):
     num_stage = len([int(nd) for nd in args.ndepths.split(",") if nd])
     depth_gt = depth_gt_ms["stage{}".format(num_stage)]
     mask = mask_ms["stage{}".format(num_stage)]
-
-    outputs = model_eval(sample_cuda["imgs"], sample_cuda["proj_matrices"], sample_cuda["depth_values"])
+    
+    if args.use_lq_depth:
+        depth_lq_ms = sample_cuda["lq_depth"]
+        outputs = model(sample_cuda["imgs"], sample_cuda["proj_matrices"], sample_cuda["depth_values"], lq_depth=depth_lq_ms)
+    else:
+        outputs = model_eval(sample_cuda["imgs"], sample_cuda["proj_matrices"], sample_cuda["depth_values"])
     depth_est = outputs["depth"]
 
     loss, depth_loss = model_loss(outputs, depth_gt_ms, mask_ms, dlossw=[float(e) for e in args.dlossw.split(",") if e])
@@ -321,7 +331,7 @@ if __name__ == '__main__':
                           depth_interals_ratio=[float(d_i) for d_i in args.depth_inter_r.split(",") if d_i],
                           share_cr=args.share_cr,
                           cr_base_chs=[int(ch) for ch in args.cr_base_chs.split(",") if ch],
-                          grad_method=args.grad_method)
+                          grad_method=args.grad_method, use_lq_depth=args.use_lq_depth)
     model.to(device)
     model_loss = cas_mvsnet_loss
 
@@ -377,8 +387,10 @@ if __name__ == '__main__':
 
     # dataset, dataloader
     MVSDataset = find_dataset_def(args.dataset)
-    train_dataset = MVSDataset(args.trainpath, args.trainlist, "train", 3, args.numdepth, args.interval_scale)
-    test_dataset = MVSDataset(args.testpath, args.testlist, "test", 5, args.numdepth, args.interval_scale)
+    train_dataset = MVSDataset(args.trainpath, args.trainlist, "train", 3, args.numdepth, args.interval_scale,
+                               use_lq_depth=args.use_lq_depth)
+    test_dataset = MVSDataset(args.testpath, args.testlist, "test", 5, args.numdepth, args.interval_scale, 
+                              use_lq_depth=args.use_lq_depth)
 
     if is_distributed:
         train_sampler = torch.utils.data.DistributedSampler(train_dataset, num_replicas=dist.get_world_size(),

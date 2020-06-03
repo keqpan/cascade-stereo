@@ -16,6 +16,7 @@ class MVSDataset(Dataset):
         self.interval_scale = interval_scale
         self.kwargs = kwargs
         print("mvsdataset kwargs", self.kwargs)
+        self.use_lq_depth = self.kwargs.get("use_lq_depth", False)
 
         assert self.mode in ["train", "val", "test"]
         self.metas = self.build_list()
@@ -113,6 +114,19 @@ class MVSDataset(Dataset):
         }
         return depth_lr_ms
 
+    def read_depth_lq(self, filename):
+        # read pfm lq depth file
+        # 640, 512; downsample 1/4 -> 160, 128
+        depth_lq = np.array(read_pfm(filename)[0], dtype=np.float32)
+
+        h, w = depth_lq.shape
+        depth_lq_ms = {
+            "stage1": cv2.resize(depth_lq, (w//4, h//4), interpolation=cv2.INTER_NEAREST),
+            "stage2": cv2.resize(depth_lq, (w//2, h//2), interpolation=cv2.INTER_NEAREST),
+            "stage3": depth_lq,
+        }
+        return depth_lq_ms
+
     def __getitem__(self, idx):
         meta = self.metas[idx]
         scan, light_idx, ref_view, src_views = meta
@@ -131,6 +145,8 @@ class MVSDataset(Dataset):
 
             mask_filename_hr = os.path.join(self.datapath, 'Depths_raw/{}/depth_visual_{:0>4}.png'.format(scan, vid))
             depth_filename_hr = os.path.join(self.datapath, 'Depths_raw/{}/depth_map_{:0>4}.pfm'.format(scan, vid))
+            if self.use_lq_depth:
+                depth_filename_lq = os.path.join(self.datapath, 'InputDepths/{}_train/depth_map_{:0>4}.pfm'.format(scan, vid))
 
             proj_mat_filename = os.path.join(self.datapath, 'Cameras/train/{:0>8}_cam.txt').format(vid)
 
@@ -149,6 +165,8 @@ class MVSDataset(Dataset):
             if i == 0:  # reference view
                 mask_read_ms = self.read_mask_hr(mask_filename_hr)
                 depth_ms = self.read_depth_hr(depth_filename_hr)
+                if self.use_lq_depth:
+                    lq_depth_ms = self.read_depth_lq(depth_filename_lq)
 
                 #get depth values
                 depth_max = depth_interval * self.ndepths + depth_min
@@ -172,9 +190,12 @@ class MVSDataset(Dataset):
             "stage2": stage2_pjmats,
             "stage3": stage3_pjmats
         }
-
-        return {"imgs": imgs,
-                "proj_matrices": proj_matrices_ms,
-                "depth": depth_ms,
-                "depth_values": depth_values,
-                "mask": mask }
+        
+        output = {"imgs": imgs,
+                  "proj_matrices": proj_matrices_ms,
+                  "depth": depth_ms,
+                  "depth_values": depth_values,
+                  "mask": mask }
+        if self.use_lq_depth:
+            output["lq_depth"] = lq_depth_ms
+        return output
