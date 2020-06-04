@@ -123,8 +123,8 @@ class CascadeMVSNet(nn.Module):
                 
         if self.use_lq_depth:
             lq_depth = kwargs["lq_depth"]
-            depth = lq_depth["stage1"]
-            cur_depth = lq_depth["stage1"]
+            depth = lq_depth["stage1"].clamp(depth_min, depth_max) # this is crucial to avoid NaN's after get_depth_range_samples and DepthNet
+            cur_depth = depth
             
         for stage_idx in range(self.num_stage):
             # print("*********************stage{}*********************".format(stage_idx + 1))
@@ -143,6 +143,7 @@ class CascadeMVSNet(nn.Module):
                                                 align_corners=Align_Corners_Range).squeeze(1)
             else:
                 cur_depth = depth_values
+
             depth_range_samples = get_depth_range_samples(cur_depth=cur_depth,
                                                         ndepth=self.ndepths[stage_idx],
                                                         depth_inteval_pixel=self.depth_interals_ratio[stage_idx] * depth_interval,
