@@ -94,7 +94,6 @@ class MVSDataset(Dataset):
         # read pfm lq depth file
         # 640, 512; downsample 1/4 -> 160, 128
         depth_lq = np.array(read_pfm(filename)[0], dtype=np.float32)
-        print(depth_lq.shape)
 
         h, w = depth_lq.shape
         depth_lq_ms = {
