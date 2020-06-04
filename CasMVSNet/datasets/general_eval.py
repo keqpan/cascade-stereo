@@ -17,6 +17,7 @@ class MVSDataset(Dataset):
         self.max_h, self.max_w = kwargs["max_h"], kwargs["max_w"]
         self.fix_res = kwargs.get("fix_res", False)  #whether to fix the resolution of input image.
         self.fix_wh = False
+        self.use_lq_depth = kwargs.get("use_lq_depth", False)
 
         assert self.mode == "test"
         self.metas = self.build_list()
@@ -88,6 +89,20 @@ class MVSDataset(Dataset):
     def read_depth(self, filename):
         # read pfm depth file
         return np.array(read_pfm(filename)[0], dtype=np.float32)
+    
+    def read_depth_lq(self, filename):
+        # read pfm lq depth file
+        # 640, 512; downsample 1/4 -> 160, 128
+        depth_lq = np.array(read_pfm(filename)[0], dtype=np.float32)
+        print(depth_lq.shape)
+
+        h, w = depth_lq.shape
+        depth_lq_ms = {
+            "stage1": cv2.resize(depth_lq, (w//4, h//4), interpolation=cv2.INTER_NEAREST),
+            "stage2": cv2.resize(depth_lq, (w//2, h//2), interpolation=cv2.INTER_NEAREST),
+            "stage3": depth_lq,
+        }
+        return depth_lq_ms
 
     def scale_mvs_input(self, img, intrinsics, max_w, max_h, base=32):
         h, w = img.shape[:2]
@@ -125,7 +140,9 @@ class MVSDataset(Dataset):
                 img_filename = os.path.join(self.datapath, '{}/images/{:0>8}.jpg'.format(scan, vid))
 
             proj_mat_filename = os.path.join(self.datapath, '{}/cams/{:0>8}_cam.txt'.format(scan, vid))
-
+            if self.use_lq_depth:
+                depth_filename_lq = os.path.join('/data/mvs_training/dtu/InputDepths/{}/depth_map_{:0>4}.pfm'.format(scan, vid))
+                
             img = self.read_img(img_filename)
             intrinsics, extrinsics, depth_min, depth_interval = self.read_cam_file(proj_mat_filename, interval_scale=
                                                                                    self.interval_scale[scene_name])
@@ -163,6 +180,8 @@ class MVSDataset(Dataset):
             if i == 0:  # reference view
                 depth_values = np.arange(depth_min, depth_interval * (self.ndepths - 0.5) + depth_min, depth_interval,
                                          dtype=np.float32)
+                if self.use_lq_depth:
+                    lq_depth_ms = self.read_depth_lq(depth_filename_lq)
 
         #all
         imgs = np.stack(imgs).transpose([0, 3, 1, 2])
@@ -179,7 +198,11 @@ class MVSDataset(Dataset):
             "stage3": stage3_pjmats
         }
 
-        return {"imgs": imgs,
-                "proj_matrices": proj_matrices_ms,
-                "depth_values": depth_values,
-                "filename": scan + '/{}/' + '{:0>8}'.format(view_ids[0]) + "{}"}
+        output = {"imgs": imgs,
+                  "proj_matrices": proj_matrices_ms,
+                  "depth_values": depth_values,
+                  "filename": scan + '/{}/' + '{:0>8}'.format(view_ids[0]) + "{}"}
+        if self.use_lq_depth:
+            output["lq_depth"] = lq_depth_ms
+        return output
+

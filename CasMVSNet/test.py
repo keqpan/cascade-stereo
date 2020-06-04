@@ -64,6 +64,7 @@ parser.add_argument('--prob_threshold', type=float, default='0.9')
 parser.add_argument('--disp_threshold', type=float, default='0.25')
 parser.add_argument('--num_consistent', type=float, default='4')
 
+parser.add_argument('--use_lq_depth', action="store_true", default=False)
 
 # parse arguments and check
 args = parser.parse_args()
@@ -154,7 +155,7 @@ def save_scene_depth(testlist):
     # dataset, dataloader
     MVSDataset = find_dataset_def(args.dataset)
     test_dataset = MVSDataset(args.testpath, testlist, "test", args.num_view, args.numdepth, Interval_Scale,
-                              max_h=args.max_h, max_w=args.max_w, fix_res=args.fix_res)
+                              max_h=args.max_h, max_w=args.max_w, fix_res=args.fix_res, use_lq_depth=args.use_lq_depth)
     TestImgLoader = DataLoader(test_dataset, args.batch_size, shuffle=False, num_workers=4, drop_last=False)
 
     # model
@@ -162,7 +163,8 @@ def save_scene_depth(testlist):
                           depth_interals_ratio=[float(d_i) for d_i in args.depth_inter_r.split(",") if d_i],
                           share_cr=args.share_cr,
                           cr_base_chs=[int(ch) for ch in args.cr_base_chs.split(",") if ch],
-                          grad_method=args.grad_method)
+                          grad_method=args.grad_method,
+                          use_lq_depth=args.use_lq_depth)
 
     # load checkpoint file specified by args.loadckpt
     print("loading model {}".format(args.loadckpt))
@@ -176,7 +178,11 @@ def save_scene_depth(testlist):
         for batch_idx, sample in enumerate(TestImgLoader):
             sample_cuda = tocuda(sample)
             start_time = time.time()
-            outputs = model(sample_cuda["imgs"], sample_cuda["proj_matrices"], sample_cuda["depth_values"])
+            if args.use_lq_depth:
+                depth_lq_ms = sample_cuda["lq_depth"]
+                outputs = model(sample_cuda["imgs"], sample_cuda["proj_matrices"], sample_cuda["depth_values"], lq_depth=depth_lq_ms)
+            else:
+                outputs = model(sample_cuda["imgs"], sample_cuda["proj_matrices"], sample_cuda["depth_values"])
             end_time = time.time()
             outputs = tensor2numpy(outputs)
             del sample_cuda
